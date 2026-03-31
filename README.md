@@ -461,7 +461,4 @@ Les contributions sont les bienvenues ! N'hésitez pas à ouvrir une *issue* ou 
 
 
 Ce projet est développé par [Inria Datalake](https://github.com/Inria-Datalake).
-=======
-Ce projet est développé par [Inria Datalake](https://github.com/Inria-Datalake).
-
->>>>>>> 3fd2912a66bd764f3658407442bc7d0387c8d876
+Créé par Andréa NEBOT
