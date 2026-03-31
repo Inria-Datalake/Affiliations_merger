@@ -3,13 +3,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   Check, GitMerge, ChevronDown, ChevronUp,
   CheckSquare, Square, Pencil, Search, X,
-  RefreshCw, SlidersHorizontal, BookOpen, ChevronRight
+  RefreshCw, SlidersHorizontal, BookOpen, Building2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import RORSearch from "./RORSearch";
 
 function AddToDictionaryPopover({ categories, onAdd, onClose }) {
   const [selected, setSelected] = useState(categories[0] || "");
@@ -17,7 +17,7 @@ function AddToDictionaryPopover({ categories, onAdd, onClose }) {
     <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       className="absolute right-0 top-full mt-1 z-30 w-56 rounded-xl border bg-background shadow-xl p-3 space-y-2">
-      <p className="text-xs font-semibold text-foreground">Ajouter au dictionnaire</p>
+      <p className="text-xs font-semibold">Ajouter au dictionnaire</p>
       <div className="space-y-1 max-h-36 overflow-y-auto">
         {categories.map((cat) => (
           <button key={cat} onClick={() => setSelected(cat)}
@@ -42,18 +42,29 @@ function AddToDictionaryPopover({ categories, onAdd, onClose }) {
   );
 }
 
-function GroupCard({ group, index, groupSelected, onToggleGroup, variantSelected, onToggleVariant, mergedName, onRename, dictionaryCategories, onAddToDictionary }) {
+function GroupCard({
+  group, index, groupSelected, onToggleGroup,
+  variantSelected, onToggleVariant,
+  mergedName, onRename,
+  dictionaryCategories, onAddToDictionary,
+}) {
   const [expanded, setExpanded] = useState(true);
   const [editing, setEditing] = useState(false);
   const [nameValue, setNameValue] = useState(mergedName);
   const [showDicoPopover, setShowDicoPopover] = useState(false);
+  const [showROR, setShowROR] = useState(false);
 
   const activeCount = variantSelected.filter(Boolean).length;
   const totalVariants = group.variants.length;
   const isPartial = groupSelected && activeCount > 0 && activeCount < totalVariants;
   const isFromDictionary = group.fromDictionary === true;
-
   const confidenceColor = group.confidence >= 0.8 ? "#22c55e" : group.confidence >= 0.5 ? "#f59e0b" : "#ef4444";
+
+  const handleRORSelect = (org) => {
+    setNameValue(org.name);
+    onRename(index, org.name);
+    setShowROR(false);
+  };
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
@@ -65,6 +76,7 @@ function GroupCard({ group, index, groupSelected, onToggleGroup, variantSelected
         isPartial ? "border-amber-300 bg-amber-50/20" :
         "border-purple-300 bg-purple-50/30"
       )}>
+        {/* Header */}
         <div className="flex items-center gap-3 p-4">
           <button onClick={() => onToggleGroup(index)} className="shrink-0 transition-transform hover:scale-110">
             {groupSelected
@@ -91,9 +103,9 @@ function GroupCard({ group, index, groupSelected, onToggleGroup, variantSelected
                   {nameValue}
                 </span>
                 {isFromDictionary && (
-                  <Badge className="text-[10px] h-4 px-1.5 bg-emerald-100 text-emerald-700 border-emerald-200 font-normal">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded border bg-emerald-100 text-emerald-700 border-emerald-200 font-normal">
                     dictionnaire
-                  </Badge>
+                  </span>
                 )}
                 {groupSelected && (
                   <button onClick={() => setEditing(true)} className="p-1 rounded hover:bg-muted transition-colors shrink-0">
@@ -114,23 +126,41 @@ function GroupCard({ group, index, groupSelected, onToggleGroup, variantSelected
             </div>
           </div>
 
-          {/* Bouton ajouter au dictionnaire */}
-          {groupSelected && !isFromDictionary && dictionaryCategories?.length > 0 && (
-            <div className="relative shrink-0">
-              <button onClick={() => setShowDicoPopover((s) => !s)}
-                className="p-1.5 rounded-lg hover:bg-muted transition-colors border"
-                title="Ajouter au dictionnaire">
-                <BookOpen className="w-3.5 h-3.5 text-muted-foreground" />
+          {/* Actions */}
+          {groupSelected && (
+            <div className="flex items-center gap-1 shrink-0">
+              {/* Bouton ROR */}
+              <button
+                onClick={() => { setShowROR((s) => !s); setShowDicoPopover(false); }}
+                className={cn("p-1.5 rounded-lg border transition-colors",
+                  showROR ? "bg-purple-100 border-purple-300" : "hover:bg-muted border-transparent")}
+                title="Vérifier dans ROR"
+              >
+                <Building2 className={cn("w-3.5 h-3.5", showROR ? "text-purple-600" : "text-muted-foreground")} />
               </button>
-              <AnimatePresence>
-                {showDicoPopover && (
-                  <AddToDictionaryPopover
-                    categories={dictionaryCategories}
-                    onAdd={(cat) => onAddToDictionary(index, cat, nameValue)}
-                    onClose={() => setShowDicoPopover(false)}
-                  />
-                )}
-              </AnimatePresence>
+
+              {/* Bouton dictionnaire */}
+              {!isFromDictionary && dictionaryCategories?.length > 0 && (
+                <div className="relative">
+                  <button
+                    onClick={() => { setShowDicoPopover((s) => !s); setShowROR(false); }}
+                    className={cn("p-1.5 rounded-lg border transition-colors",
+                      showDicoPopover ? "bg-green-100 border-green-300" : "hover:bg-muted border-transparent")}
+                    title="Ajouter au dictionnaire"
+                  >
+                    <BookOpen className={cn("w-3.5 h-3.5", showDicoPopover ? "text-green-600" : "text-muted-foreground")} />
+                  </button>
+                  <AnimatePresence>
+                    {showDicoPopover && (
+                      <AddToDictionaryPopover
+                        categories={dictionaryCategories}
+                        onAdd={(cat) => { onAddToDictionary(index, cat, nameValue); setShowDicoPopover(false); }}
+                        onClose={() => setShowDicoPopover(false)}
+                      />
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
             </div>
           )}
 
@@ -139,6 +169,20 @@ function GroupCard({ group, index, groupSelected, onToggleGroup, variantSelected
           </button>
         </div>
 
+        {/* Panneau ROR */}
+        <AnimatePresence>
+          {showROR && groupSelected && (
+            <div className="px-4 pb-4">
+              <RORSearch
+                currentName={nameValue}
+                onSelect={handleRORSelect}
+                onClose={() => setShowROR(false)}
+              />
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Variantes */}
         <AnimatePresence>
           {expanded && (
             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
@@ -156,7 +200,8 @@ function GroupCard({ group, index, groupSelected, onToggleGroup, variantSelected
                         ? <Check className="w-4 h-4" style={{ color: isFromDictionary ? "#059669" : "#7209B7" }} />
                         : <X className="w-4 h-4 text-muted-foreground/50" />}
                     </div>
-                    <span className={cn("text-xs", groupSelected && variantSelected[vi] ? "text-foreground font-medium" : "text-muted-foreground line-through")}>
+                    <span className={cn("text-xs",
+                      groupSelected && variantSelected[vi] ? "text-foreground font-medium" : "text-muted-foreground line-through")}>
                       {v}
                     </span>
                   </div>
@@ -177,7 +222,6 @@ export default function FusionReview({ groups: initialGroups, onComplete, onRean
   const [minConfidence, setMinConfidence] = useState(initialMinConfidence);
   const [showConfidencePanel, setShowConfidencePanel] = useState(false);
   const [search, setSearch] = useState("");
-
   const [groupSelected, setGroupSelected] = useState(() => new Array(initialGroups.length).fill(true));
   const [variantSelected, setVariantSelected] = useState(() =>
     initialGroups.map((g) => new Array(g.variants.length).fill(true))
@@ -247,21 +291,18 @@ export default function FusionReview({ groups: initialGroups, onComplete, onRean
       <Card className="p-4 bg-card/50 backdrop-blur-sm space-y-3">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-foreground">
+            <h3 className="text-sm font-semibold">
               {filteredOriginalIndices.length} / {initialGroups.length} groupes affichés
             </h3>
-            <div className="flex items-center gap-3 mt-0.5">
+            <div className="flex items-center gap-3 mt-0.5 flex-wrap">
               <p className="text-xs text-muted-foreground">
                 <span style={{ color: "#7209B7" }} className="font-medium">{validCount}</span> fusion{validCount > 1 ? "s" : ""} prête{validCount > 1 ? "s" : ""}
               </p>
-              {dicoGroups > 0 && (
-                <span className="text-xs text-emerald-600 font-medium flex items-center gap-1">
-                  <BookOpen className="w-3 h-3" />{dicoGroups} du dictionnaire
-                </span>
-              )}
-              {iaGroups > 0 && (
-                <span className="text-xs text-purple-600 font-medium">{iaGroups} par IA</span>
-              )}
+              {dicoGroups > 0 && <span className="text-xs text-emerald-600 font-medium flex items-center gap-1"><BookOpen className="w-3 h-3" />{dicoGroups} du dictionnaire</span>}
+              {iaGroups > 0 && <span className="text-xs text-purple-600 font-medium">{iaGroups} par IA</span>}
+              <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
+                <Building2 className="w-3 h-3" />Cliquez 🏢 pour vérifier dans ROR
+              </span>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -290,7 +331,7 @@ export default function FusionReview({ groups: initialGroups, onComplete, onRean
               <div className="pt-2 space-y-3 border-t">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-medium">Seuil minimum : <span style={{ color: "#7209B7" }} className="font-bold">{minConfidence}%</span></p>
-                  <p className="text-xs text-muted-foreground">{filteredOriginalIndices.length} groupes affichés</p>
+                  <p className="text-xs text-muted-foreground">{filteredOriginalIndices.length} groupes</p>
                 </div>
                 <input type="range" min={0} max={99} step={5} value={minConfidence}
                   onChange={(e) => setMinConfidence(Number(e.target.value))}
@@ -325,7 +366,7 @@ export default function FusionReview({ groups: initialGroups, onComplete, onRean
       <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
         {filteredIndices.length === 0
           ? <p className="text-center text-sm text-muted-foreground py-8">Aucun résultat.</p>
-          : filteredIndices.map((oi, di) => (
+          : filteredIndices.map((oi) => (
             <GroupCard key={oi} index={oi} group={initialGroups[oi]}
               groupSelected={groupSelected[oi]} onToggleGroup={handleToggleGroup}
               variantSelected={variantSelected[oi]} onToggleVariant={handleToggleVariant}
