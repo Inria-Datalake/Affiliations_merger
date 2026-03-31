@@ -62,7 +62,10 @@ function mergeGroups(groups) {
     if (existing) {
       const combined = new Set([...existing.variants.map((v) => v.trim()), ...group.variants.map((v) => v.trim())]);
       existing.variants = [...combined];
-      if (group.confidence > existing.confidence) { existing.merged_name = group.merged_name; existing.confidence = group.confidence; }
+      if (group.confidence > existing.confidence) {
+        existing.merged_name = group.merged_name;
+        existing.confidence = group.confidence;
+      }
     } else {
       result.push({ ...group, variants: group.variants.map((v) => v.trim()) });
     }
@@ -79,20 +82,22 @@ export default function AffiliationMerger() {
   const [selectedColumn, setSelectedColumn] = useState(null);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [analysisOptions, setAnalysisOptions] = useState({ useBatches: false, minConfidence: 50 });
+  // Compteur de tours de fusion (pour l'affichage)
+  const [fusionRound, setFusionRound] = useState(1);
 
   const dictionary = useDictionary();
 
   const runAnalysis = useCallback(async (uniqueAffiliations, options = {}) => {
     const { useBatches = false, minConfidence = 0 } = options;
 
-    // ── Étape 1 : pré-remplir depuis le dictionnaire ──────────────
+    // Étape 1 : pré-remplir depuis le dictionnaire
     const { knownGroups, unknownAffiliations } = dictionary.preProcess(uniqueAffiliations);
 
-    // ── Étape 2 : envoyer les inconnues à l'IA ────────────────────
+    // Étape 2 : envoyer les inconnues à l'IA
     const BATCH_SIZE = useBatches ? 50 : 100000;
     const batches = unknownAffiliations.length > 0 ? chunkArray(unknownAffiliations, BATCH_SIZE) : [];
 
-    setProgress({ current: 0, total: batches.length + (knownGroups.length > 0 ? 1 : 0) });
+    setProgress({ current: 0, total: batches.length });
     setStep(1);
 
     const iaGroups = [];
@@ -104,8 +109,7 @@ export default function AffiliationMerger() {
 
     const mergedIa = mergeGroups(iaGroups);
 
-    // ── Étape 3 : combiner dictionnaire + IA ──────────────────────
-    // Les groupes du dictionnaire viennent EN PREMIER
+    // Étape 3 : combiner dictionnaire + IA (dictionnaire en premier)
     const allGroups = [...knownGroups, ...mergedIa];
 
     setFusionGroups(allGroups);
@@ -119,28 +123,54 @@ export default function AffiliationMerger() {
     }
   }, [dictionary]);
 
+  // ── Import initial depuis FileUpload ─────────────────────────
   const handleFileProcessed = useCallback(async (uniqueAffiliations, rawData, selectedColumn, options) => {
     setAffiliations(uniqueAffiliations);
     setRawData(rawData);
     setSelectedColumn(selectedColumn);
+    setFusionRound(1);
     await runAnalysis(uniqueAffiliations, options);
   }, [runAnalysis]);
 
+  // ── Ré-analyse (bouton dans FusionReview) ────────────────────
   const handleReanalyze = useCallback(async () => {
     if (affiliations.length === 0) return;
     await runAnalysis(affiliations, analysisOptions);
   }, [affiliations, analysisOptions, runAnalysis]);
 
+  // ── Retraitement depuis ExportResult ─────────────────────────
+  // enrichedData = rawData avec colonne Affiliation_Fusionnee ajoutée
+  // fusedColumn  = "Affiliation_Fusionnee"
+  const handleReprocess = useCallback(async (enrichedData, fusedColumn, options) => {
+    // La nouvelle source est la colonne fusionnée
+    const newAffiliations = enrichedData
+      .map((row) => String(row[fusedColumn] || "").trim())
+      .filter(Boolean);
+    const uniqueNew = [...new Set(newAffiliations)];
+
+    setRawData(enrichedData);
+    setSelectedColumn(fusedColumn);
+    setAffiliations(uniqueNew);
+    setApprovedFusions([]);
+    setFusionGroups([]);
+    setFusionRound((r) => r + 1);
+
+    await runAnalysis(uniqueNew, options || analysisOptions);
+  }, [analysisOptions, runAnalysis]);
+
+  // ── Validation ───────────────────────────────────────────────
   const handleFusionComplete = useCallback((approved) => {
     setApprovedFusions(approved);
     setStep(3);
   }, []);
 
+  // ── Recommencer depuis zéro ──────────────────────────────────
   const handleRestart = useCallback(() => {
     setStep(0);
     setAffiliations([]); setFusionGroups([]); setApprovedFusions([]);
     setRawData([]); setSelectedColumn(null);
     setProgress({ current: 0, total: 0 });
+    setFusionRound(1);
   }, []);
 
   return (
@@ -162,7 +192,15 @@ export default function AffiliationMerger() {
             </div>
             <div>
               <h1 className="text-base font-bold tracking-tight leading-tight">Affiliation Merger</h1>
-              <p className="text-[11px] text-muted-foreground leading-none">Fusionnez les affiliations similaires grâce à l'IA</p>
+              <p className="text-[11px] text-muted-foreground leading-none">
+                Fusionnez les affiliations similaires grâce à l'IA
+                {fusionRound > 1 && (
+                  <span className="ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
+                    style={{ background: "rgba(114,9,183,0.1)", color: "#7209B7" }}>
+                    Tour {fusionRound}
+                  </span>
+                )}
+              </p>
             </div>
           </div>
           {dictionary.totalEntries > 0 && (
@@ -201,6 +239,8 @@ export default function AffiliationMerger() {
             rawData={rawData}
             selectedColumn={selectedColumn}
             onRestart={handleRestart}
+            onReprocess={handleReprocess}
+            analysisOptions={analysisOptions}
           />
         )}
       </main>
