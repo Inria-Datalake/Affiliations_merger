@@ -31,3 +31,5 @@ dist-ssr
 .vite
 
 .env.local
+
+dictionary.json
