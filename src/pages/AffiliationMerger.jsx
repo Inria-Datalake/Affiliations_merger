@@ -6,6 +6,7 @@ import FileUpload from "../components/merger/FileUpload";
 import AnalysisLoader from "../components/merger/AnalysisLoader";
 import FusionReview from "../components/merger/FusionReview";
 import ExportResult from "../components/merger/ExportResult";
+import PreProcessReport from "../components/merger/PreProcessReport";
 import { useDictionary } from "../hooks/useDictionary";
 
 function chunkArray(arr, size) {
@@ -73,8 +74,15 @@ function mergeGroups(groups) {
   return result;
 }
 
+// Étape intermédiaire entre Import et Analyse
+const STEP_IMPORT = 0;
+const STEP_PREPROCESS = 0.5; // étape virtuelle (même stepper visuel que 0)
+const STEP_ANALYSIS = 1;
+const STEP_REVIEW = 2;
+const STEP_EXPORT = 3;
+
 export default function AffiliationMerger() {
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(STEP_IMPORT);
   const [affiliations, setAffiliations] = useState([]);
   const [fusionGroups, setFusionGroups] = useState([]);
   const [approvedFusions, setApprovedFusions] = useState([]);
@@ -82,23 +90,23 @@ export default function AffiliationMerger() {
   const [selectedColumn, setSelectedColumn] = useState(null);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [analysisOptions, setAnalysisOptions] = useState({ useBatches: false, minConfidence: 50 });
-  // Compteur de tours de fusion (pour l'affichage)
   const [fusionRound, setFusionRound] = useState(1);
+
+  // Rapport de pré-traitement
+  const [preProcessData, setPreProcessData] = useState(null);
+  // Affiliations après éventuelle scission multi-org
+  const [pendingAffiliations, setPendingAffiliations] = useState([]);
 
   const dictionary = useDictionary();
 
-  const runAnalysis = useCallback(async (uniqueAffiliations, options = {}) => {
-    const { useBatches = false, minConfidence = 0 } = options;
-
-    // Étape 1 : pré-remplir depuis le dictionnaire
-    const { knownGroups, unknownAffiliations } = dictionary.preProcess(uniqueAffiliations);
-
-    // Étape 2 : envoyer les inconnues à l'IA
+  // ── Lancement de l'analyse IA ────────────────────────────────
+  const runIAAnalysis = useCallback(async (uniqueAffiliations, options = {}) => {
+    const { useBatches = false } = options;
     const BATCH_SIZE = useBatches ? 50 : 100000;
-    const batches = unknownAffiliations.length > 0 ? chunkArray(unknownAffiliations, BATCH_SIZE) : [];
+    const batches = uniqueAffiliations.length > 0 ? chunkArray(uniqueAffiliations, BATCH_SIZE) : [];
 
     setProgress({ current: 0, total: batches.length });
-    setStep(1);
+    setStep(STEP_ANALYSIS);
 
     const iaGroups = [];
     for (let i = 0; i < batches.length; i++) {
@@ -107,71 +115,107 @@ export default function AffiliationMerger() {
       setProgress({ current: i + 1, total: batches.length });
     }
 
-    const mergedIa = mergeGroups(iaGroups);
+    return mergeGroups(iaGroups);
+  }, []);
 
-    // Étape 3 : combiner dictionnaire + IA (dictionnaire en premier)
-    const allGroups = [...knownGroups, ...mergedIa];
-
+  // ── Orchestration complète ───────────────────────────────────
+  const runFullAnalysis = useCallback(async (uniqueAffiliations, options = {}) => {
+    const { knownGroups, unknownAffiliations } = dictionary.preProcess(uniqueAffiliations);
+    const iaGroups = await runIAAnalysis(unknownAffiliations, options);
+    const allGroups = [...knownGroups, ...iaGroups];
     setFusionGroups(allGroups);
-    setAnalysisOptions({ useBatches, minConfidence });
+    setAnalysisOptions(options);
+    if (allGroups.length === 0) { setApprovedFusions([]); setStep(STEP_EXPORT); }
+    else setStep(STEP_REVIEW);
+  }, [dictionary, runIAAnalysis]);
 
-    if (allGroups.length === 0) {
-      setApprovedFusions([]);
-      setStep(3);
-    } else {
-      setStep(2);
-    }
-  }, [dictionary]);
-
-  // ── Import initial depuis FileUpload ─────────────────────────
-  const handleFileProcessed = useCallback(async (uniqueAffiliations, rawData, selectedColumn, options) => {
+  // ── Étape 1 : fichier importé → pré-traitement ───────────────
+  const handleFileProcessed = useCallback((uniqueAffiliations, rawData, selectedColumn, options) => {
     setAffiliations(uniqueAffiliations);
     setRawData(rawData);
     setSelectedColumn(selectedColumn);
     setFusionRound(1);
-    await runAnalysis(uniqueAffiliations, options);
-  }, [runAnalysis]);
+    setAnalysisOptions(options);
 
-  // ── Ré-analyse (bouton dans FusionReview) ────────────────────
+    // Pré-traitement
+    const { knownGroups, unknownAffiliations, exactDuplicates, multiOrgCandidates } =
+      dictionary.preProcess(uniqueAffiliations);
+
+    setPendingAffiliations(uniqueAffiliations);
+    setPreProcessData({
+      exactDuplicates,
+      multiOrgCandidates,
+      knownFromDictionary: knownGroups.length,
+      totalBefore: uniqueAffiliations.length,
+      totalAfterDedup: uniqueAffiliations.length - exactDuplicates.length,
+      options,
+    });
+
+    // Si rien à signaler, lancer directement l'analyse
+    if (exactDuplicates.length === 0 && multiOrgCandidates.length === 0 && knownGroups.length === 0) {
+      runFullAnalysis(uniqueAffiliations, options);
+    } else {
+      setStep(STEP_PREPROCESS);
+    }
+  }, [dictionary, runFullAnalysis]);
+
+  // ── Scission multi-organismes ────────────────────────────────
+  const handleSplitMultiOrg = useCallback((splitMap) => {
+    // Remplacer les affiliations multi-org par leurs parties
+    const result = [];
+    for (const aff of pendingAffiliations) {
+      if (splitMap.has(aff)) {
+        result.push(...splitMap.get(aff));
+      } else {
+        result.push(aff);
+      }
+    }
+    const unique = [...new Set(result.map((a) => a.trim()).filter(Boolean))];
+    setAffiliations(unique);
+    setPendingAffiliations(unique);
+    runFullAnalysis(unique, preProcessData?.options || analysisOptions);
+  }, [pendingAffiliations, preProcessData, analysisOptions, runFullAnalysis]);
+
+  // ── Ignorer le rapport et lancer directement ─────────────────
+  const handleSkipPreProcess = useCallback(() => {
+    runFullAnalysis(pendingAffiliations, preProcessData?.options || analysisOptions);
+  }, [pendingAffiliations, preProcessData, analysisOptions, runFullAnalysis]);
+
+  // ── Ré-analyse ────────────────────────────────────────────────
   const handleReanalyze = useCallback(async () => {
     if (affiliations.length === 0) return;
-    await runAnalysis(affiliations, analysisOptions);
-  }, [affiliations, analysisOptions, runAnalysis]);
+    await runFullAnalysis(affiliations, analysisOptions);
+  }, [affiliations, analysisOptions, runFullAnalysis]);
 
-  // ── Retraitement depuis ExportResult ─────────────────────────
-  // enrichedData = rawData avec colonne Affiliation_Fusionnee ajoutée
-  // fusedColumn  = "Affiliation_Fusionnee"
+  // ── Retraitement depuis Export ────────────────────────────────
   const handleReprocess = useCallback(async (enrichedData, fusedColumn, options) => {
-    // La nouvelle source est la colonne fusionnée
-    const newAffiliations = enrichedData
-      .map((row) => String(row[fusedColumn] || "").trim())
-      .filter(Boolean);
-    const uniqueNew = [...new Set(newAffiliations)];
-
+    const newAffiliations = [...new Set(
+      enrichedData.map((r) => String(r[fusedColumn] || "").trim()).filter(Boolean)
+    )];
     setRawData(enrichedData);
     setSelectedColumn(fusedColumn);
-    setAffiliations(uniqueNew);
+    setAffiliations(newAffiliations);
     setApprovedFusions([]);
     setFusionGroups([]);
     setFusionRound((r) => r + 1);
+    await runFullAnalysis(newAffiliations, options || analysisOptions);
+  }, [analysisOptions, runFullAnalysis]);
 
-    await runAnalysis(uniqueNew, options || analysisOptions);
-  }, [analysisOptions, runAnalysis]);
-
-  // ── Validation ───────────────────────────────────────────────
   const handleFusionComplete = useCallback((approved) => {
     setApprovedFusions(approved);
-    setStep(3);
+    setStep(STEP_EXPORT);
   }, []);
 
-  // ── Recommencer depuis zéro ──────────────────────────────────
   const handleRestart = useCallback(() => {
-    setStep(0);
+    setStep(STEP_IMPORT);
     setAffiliations([]); setFusionGroups([]); setApprovedFusions([]);
     setRawData([]); setSelectedColumn(null);
     setProgress({ current: 0, total: 0 });
-    setFusionRound(1);
+    setFusionRound(1); setPreProcessData(null); setPendingAffiliations([]);
   }, []);
+
+  // Stepper visuel : l'étape PREPROCESS s'affiche comme étape 0
+  const stepperStep = step === STEP_PREPROCESS ? 0 : step;
 
   return (
     <div className="min-h-screen" style={{ background: "linear-gradient(135deg, #F8F9FF 0%, #f0e8ff 40%, #e8f4ff 100%)" }}>
@@ -180,7 +224,12 @@ export default function AffiliationMerger() {
           <img
             src="https://raw.githubusercontent.com/Inria-Datalake/Copublications/refs/heads/main/dashboard/assets/logo_inria.png"
             alt="Inria" className="h-10 w-auto object-contain"
-            onError={(e) => { e.target.style.display = "none"; e.target.nextSibling.style.display = "flex"; }}
+            onError={(e) => {
+              const img = e.currentTarget;
+              img.style.display = "none";
+              const fallback = img.nextSibling;
+              if (fallback) fallback.style.display = "flex";
+            }}
           />
           <div style={{ display: "none" }} className="items-center gap-1">
             <div className="w-8 h-8 rounded bg-[#E3051B] flex items-center justify-center text-white font-black text-lg">i</div>
@@ -203,27 +252,55 @@ export default function AffiliationMerger() {
               </p>
             </div>
           </div>
-          {dictionary.totalEntries > 0 && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
-              style={{ background: "rgba(5,150,105,0.1)", color: "#059669" }}>
-              <span>📚</span>
-              <span>{dictionary.totalEntries} entrées</span>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {dictionary.totalEntries > 0 && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+                style={{ background: "rgba(5,150,105,0.1)", color: "#059669" }}>
+                <span>📚</span>
+                <span>{dictionary.totalEntries} entrées</span>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-8">
-        <Stepper currentStep={step} />
+        <Stepper currentStep={stepperStep} />
 
-        {step === 0 && (
-          <FileUpload
-            onFileProcessed={handleFileProcessed}
-            dictionaryProps={dictionary}
-          />
+        {/* Étape 0 : Import */}
+        {step === STEP_IMPORT && (
+          <FileUpload onFileProcessed={handleFileProcessed} dictionaryProps={dictionary} />
         )}
-        {step === 1 && <AnalysisLoader progress={progress} />}
-        {step === 2 && (
+
+        {/* Étape 0.5 : Rapport pré-traitement */}
+        {step === STEP_PREPROCESS && preProcessData && (
+          <div className="space-y-4">
+            <PreProcessReport
+              exactDuplicates={preProcessData.exactDuplicates}
+              multiOrgCandidates={preProcessData.multiOrgCandidates}
+              knownFromDictionary={preProcessData.knownFromDictionary}
+              totalBefore={preProcessData.totalBefore}
+              totalAfterDedup={preProcessData.totalAfterDedup}
+              onSplitMultiOrg={preProcessData.multiOrgCandidates.length > 0 ? handleSplitMultiOrg : null}
+              onSkip={handleSkipPreProcess}
+            />
+            {/* Bouton continuer si pas de multi-org à scinder */}
+            {preProcessData.multiOrgCandidates.length === 0 && (
+              <button
+                onClick={handleSkipPreProcess}
+                className="w-full py-3 rounded-xl text-white text-sm font-medium transition-opacity hover:opacity-90"
+                style={{ background: "linear-gradient(135deg, #7209B7, #4CC9F0)" }}>
+                Continuer vers l'analyse →
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Étape 1 : Analyse IA */}
+        {step === STEP_ANALYSIS && <AnalysisLoader progress={progress} />}
+
+        {/* Étape 2 : Validation */}
+        {step === STEP_REVIEW && (
           <FusionReview
             groups={fusionGroups}
             onComplete={handleFusionComplete}
@@ -232,7 +309,9 @@ export default function AffiliationMerger() {
             dictionaryProps={dictionary}
           />
         )}
-        {step === 3 && (
+
+        {/* Étape 3 : Export */}
+        {step === STEP_EXPORT && (
           <ExportResult
             approvedFusions={approvedFusions}
             originalAffiliations={affiliations}

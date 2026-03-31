@@ -1,21 +1,20 @@
 /**
  * useDictionary.js
  * Hook de gestion du dictionnaire d'affiliations.
- * Stockage : fichier JSON importable/exportable (via state React).
+ * - Persistance automatique dans localStorage
+ * - Import / Export JSON
+ * - Pré-traitement : déduplication exacte + pré-remplissage depuis le dico
  *
- * Structure du dictionnaire :
+ * Structure :
  * {
- *   categories: {
- *     "Affiliations": { "variante 1": "Nom canonique", "variante 2": "Nom canonique" },
- *     "Pays": { ... },
- *     ...
- *   },
+ *   categories: { "Affiliations": { "variante": "canonique", ... }, ... },
  *   meta: { createdAt, updatedAt, version }
  * }
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
+const STORAGE_KEY = "affiliation_merger_dictionary";
 const PREDEFINED_CATEGORIES = ["Affiliations", "Pays", "Laboratoires", "Établissements"];
 
 const DEFAULT_DICTIONARY = {
@@ -27,50 +26,109 @@ const DEFAULT_DICTIONARY = {
   },
 };
 
+/** Charge le dictionnaire depuis localStorage, ou retourne le défaut */
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_DICTIONARY;
+    const parsed = JSON.parse(raw);
+    // S'assurer que toutes les catégories prédéfinies existent
+    const categories = { ...parsed.categories };
+    for (const cat of PREDEFINED_CATEGORIES) {
+      if (!categories[cat]) categories[cat] = {};
+    }
+    return { ...parsed, categories };
+  } catch {
+    return DEFAULT_DICTIONARY;
+  }
+}
+
+/** Sauvegarde dans localStorage */
+function saveToStorage(dict) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(dict));
+  } catch (e) {
+    console.warn("localStorage plein ou indisponible :", e);
+  }
+}
+
 export function useDictionary() {
-  const [dictionary, setDictionary] = useState(DEFAULT_DICTIONARY);
+  const [dictionary, setDictionaryState] = useState(() => loadFromStorage());
 
-  // ── Lecture ──────────────────────────────────────────────
+  // Wrapper qui sauvegarde automatiquement à chaque modification
+  const setDictionary = useCallback((updater) => {
+    setDictionaryState((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      saveToStorage(next);
+      return next;
+    });
+  }, []);
 
-  /** Retourne toutes les catégories disponibles */
-  const getCategories = useCallback(() => {
-    return Object.keys(dictionary.categories);
-  }, [dictionary]);
+  // ── Lecture ──────────────────────────────────────────────────
 
-  /** Retourne les entrées d'une catégorie : { variante → canonique } */
-  const getEntries = useCallback((category) => {
-    return dictionary.categories[category] || {};
-  }, [dictionary]);
+  const getCategories = useCallback(() => Object.keys(dictionary.categories), [dictionary]);
 
-  /**
-   * Cherche une variante dans TOUTES les catégories.
-   * Retourne { canonicalName, category } ou null.
-   */
+  const getEntries = useCallback((category) => dictionary.categories[category] || {}, [dictionary]);
+
+  /** Cherche une variante dans toutes les catégories */
   const lookup = useCallback((variant) => {
     const key = variant.trim().toLowerCase();
     for (const [cat, entries] of Object.entries(dictionary.categories)) {
       for (const [v, canonical] of Object.entries(entries)) {
-        if (v.trim().toLowerCase() === key) {
-          return { canonicalName: canonical, category: cat };
-        }
+        if (v.trim().toLowerCase() === key) return { canonicalName: canonical, category: cat };
       }
     }
     return null;
   }, [dictionary]);
 
+  // ── Pré-traitement ───────────────────────────────────────────
+
   /**
-   * Pré-remplit les fusions connues depuis le dictionnaire.
-   * Retourne { knownGroups, unknownAffiliations }
-   * - knownGroups : groupes reconstituables depuis le dico
-   * - unknownAffiliations : affiliations non trouvées dans le dico
+   * 1. Déduplication exacte (case-insensitive, espaces normalisés)
+   * 2. Détection des affiliations multi-organismes (séparateur ; ou ,)
+   * 3. Pré-remplissage depuis le dictionnaire
+   *
+   * Retourne :
+   * {
+   *   knownGroups,          // groupes issus du dictionnaire
+   *   unknownAffiliations,  // à envoyer à l'IA
+   *   exactDuplicates,      // doublons exacts fusionnés (stats)
+   *   multiOrgCandidates,   // affiliations multi-organismes détectées
+   * }
    */
   const preProcess = useCallback((affiliations) => {
-    // Regrouper les affiliations par leur nom canonique
-    const canonicalMap = {}; // canonicalName → { variants[], category }
+    // ── Étape 1 : normalisation et déduplication exacte ──────
+    const normalizeStr = (s) => s.trim().replace(/\s+/g, " ").toLowerCase();
 
-    const unknown = [];
+    const seen = new Map(); // normalized → original le plus fréquent
+    const exactDuplicates = [];
 
     for (const aff of affiliations) {
+      const norm = normalizeStr(aff);
+      if (seen.has(norm)) {
+        exactDuplicates.push({ duplicate: aff, canonical: seen.get(norm) });
+      } else {
+        seen.set(norm, aff);
+      }
+    }
+
+    const deduplicated = [...seen.values()];
+
+    // ── Étape 2 : détection multi-organismes ────────────────
+    // Détecte les affiliations qui contiennent plusieurs orgs séparées par ; ou " , "
+    const MULTI_SEP = /\s*;\s*/;
+    const multiOrgCandidates = deduplicated
+      .filter((aff) => MULTI_SEP.test(aff))
+      .map((aff) => ({
+        original: aff,
+        parts: aff.split(MULTI_SEP).map((p) => p.trim()).filter(Boolean),
+      }));
+
+    // ── Étape 3 : pré-remplissage dictionnaire ───────────────
+    const canonicalMap = {};
+    const unknown = [];
+
+    for (const aff of deduplicated) {
       const found = lookup(aff);
       if (found) {
         const key = found.canonicalName;
@@ -83,24 +141,19 @@ export function useDictionary() {
       }
     }
 
-    // Ne garder que les groupes avec au moins 2 variantes (vraie fusion)
-    // Les singletons connus passent quand même pour info
-    const knownGroups = Object.values(canonicalMap)
-      .filter((g) => g.variants.length >= 1)
-      .map((g) => ({
-        variants: g.variants,
-        merged_name: g.canonicalName,
-        confidence: 1.0,
-        fromDictionary: true,
-        category: g.category,
-      }));
+    const knownGroups = Object.values(canonicalMap).map((g) => ({
+      variants: g.variants,
+      merged_name: g.canonicalName,
+      confidence: 1.0,
+      fromDictionary: true,
+      category: g.category,
+    }));
 
-    return { knownGroups, unknownAffiliations: unknown };
+    return { knownGroups, unknownAffiliations: unknown, exactDuplicates, multiOrgCandidates };
   }, [lookup]);
 
-  // ── Écriture ─────────────────────────────────────────────
+  // ── Écriture ─────────────────────────────────────────────────
 
-  /** Ajoute une catégorie */
   const addCategory = useCallback((name) => {
     const trimmed = name.trim();
     if (!trimmed) return false;
@@ -113,24 +166,20 @@ export function useDictionary() {
       };
     });
     return true;
-  }, []);
+  }, [setDictionary]);
 
-  /** Ajoute des variantes → nom canonique dans une catégorie */
   const addEntries = useCallback((category, variants, canonicalName) => {
     setDictionary((prev) => {
       const catEntries = { ...(prev.categories[category] || {}) };
-      for (const v of variants) {
-        catEntries[v.trim()] = canonicalName.trim();
-      }
+      for (const v of variants) catEntries[v.trim()] = canonicalName.trim();
       return {
         ...prev,
         categories: { ...prev.categories, [category]: catEntries },
         meta: { ...prev.meta, updatedAt: new Date().toISOString() },
       };
     });
-  }, []);
+  }, [setDictionary]);
 
-  /** Supprime une entrée */
   const removeEntry = useCallback((category, variant) => {
     setDictionary((prev) => {
       const catEntries = { ...(prev.categories[category] || {}) };
@@ -141,9 +190,13 @@ export function useDictionary() {
         meta: { ...prev.meta, updatedAt: new Date().toISOString() },
       };
     });
-  }, []);
+  }, [setDictionary]);
 
-  // ── Import / Export ───────────────────────────────────────
+  const clearDictionary = useCallback(() => {
+    setDictionary({ ...DEFAULT_DICTIONARY, meta: { ...DEFAULT_DICTIONARY.meta, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } });
+  }, [setDictionary]);
+
+  // ── Import / Export ───────────────────────────────────────────
 
   const exportDictionary = useCallback(() => {
     const json = JSON.stringify(dictionary, null, 2);
@@ -163,20 +216,19 @@ export function useDictionary() {
         try {
           const data = JSON.parse(e.target.result);
           if (!data.categories) throw new Error("Format invalide : clé 'categories' manquante.");
-          setDictionary({
+          const merged = {
             ...DEFAULT_DICTIONARY,
             ...data,
             meta: { ...data.meta, updatedAt: new Date().toISOString() },
-          });
-          resolve(data);
-        } catch (err) {
-          reject(err);
-        }
+          };
+          setDictionary(merged);
+          resolve(merged);
+        } catch (err) { reject(err); }
       };
-      reader.onerror = () => reject(new Error("Erreur de lecture du fichier."));
+      reader.onerror = () => reject(new Error("Erreur de lecture."));
       reader.readAsText(file);
     });
-  }, []);
+  }, [setDictionary]);
 
   const totalEntries = Object.values(dictionary.categories).reduce(
     (sum, cat) => sum + Object.keys(cat).length, 0
@@ -191,9 +243,11 @@ export function useDictionary() {
     addCategory,
     addEntries,
     removeEntry,
+    clearDictionary,
     exportDictionary,
     importDictionary,
     totalEntries,
     PREDEFINED_CATEGORIES,
+    lastUpdated: dictionary.meta?.updatedAt,
   };
 }
