@@ -264,10 +264,10 @@ Les contributions sont les bienvenues ! N'hésitez pas à ouvrir une *issue* ou 
 
 ---
 
-## Licence
+### Licence
 
 <<<<<<< HEAD
 Ce projet est développé par [Inria Datalake](https://github.com/Inria-Datalake).
 =======
 Ce projet est développé par [Inria Datalake](https://github.com/Inria-Datalake).
->>>>>>> 09a4452bc55082b553220adf646ebd2995032b69
+<<<<<<< 
