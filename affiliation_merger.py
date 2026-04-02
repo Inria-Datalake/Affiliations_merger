@@ -44,7 +44,7 @@ def clean_symbols(df: pd.DataFrame, save_path: str | None = None):
     counts       : pd.DataFrame  — fréquence des symboles supprimés
     symbols_list : list[str]     — symboles uniques rencontrés
     """
-    df_str = df.astype(str)
+    df_str = df.fillna("").astype(str)
 
     results, all_symbols = [], []
 
