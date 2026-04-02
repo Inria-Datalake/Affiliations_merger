@@ -203,8 +203,21 @@ export default function AffiliationMerger() {
 
   const handleFusionComplete = useCallback((approved) => {
     setApprovedFusions(approved);
+
+    // ── Ajout automatique au dictionnaire ────────────────────────
+    // Pour chaque fusion validée, on enregistre toutes les variantes
+    // → catégorie "Affiliations" par défaut (ou celle choisie dans FusionReview)
+    approved.forEach((group) => {
+      const category = group.category || "Affiliations";
+      const canonicalName = group.merged_name?.trim();
+      const variants = group.variants?.map((v) => v.trim()).filter(Boolean);
+      if (canonicalName && variants?.length > 0) {
+        dictionary.addEntries(category, variants, canonicalName);
+      }
+    });
+
     setStep(STEP_EXPORT);
-  }, []);
+  }, [dictionary]);
 
   const handleRestart = useCallback(() => {
     setStep(STEP_IMPORT);

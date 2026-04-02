@@ -11,14 +11,41 @@ import {
 import { cn } from "@/lib/utils";
 import RORSearch from "./RORSearch";
 
-function AddToDictionaryPopover({ categories, onAdd, onClose }) {
+function AddToDictionaryPopover({ categories, onAdd, onClose, anchorRect }) {
   const [selected, setSelected] = useState(categories[0] || "");
+
+  // Calcul position fixed sous le bouton, aligné à droite
+  const style = anchorRect
+    ? {
+        position: "fixed",
+        top: anchorRect.bottom + 6,
+        left: Math.max(8, anchorRect.right - 224), // 224 = w-56
+        zIndex: 9999,
+        width: 224,
+      }
+    : { position: "fixed", top: 100, right: 16, zIndex: 9999, width: 224 };
+
+  // Fermer au clic extérieur
+  React.useEffect(() => {
+    const handler = (e) => {
+      if (!e.target.closest("[data-dico-popover]")) onClose();
+    };
+    // léger délai pour ne pas capturer le clic d'ouverture
+    const t = setTimeout(() => document.addEventListener("mousedown", handler), 50);
+    return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); };
+  }, [onClose]);
+
   return (
-    <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+    <motion.div
+      data-dico-popover
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      className="absolute right-0 top-full mt-1 z-30 w-56 rounded-xl border bg-background shadow-xl p-3 space-y-2">
+      style={style}
+      className="rounded-xl border bg-background shadow-xl p-3 space-y-2"
+    >
       <p className="text-xs font-semibold">Ajouter au dictionnaire</p>
-      <div className="space-y-1 max-h-36 overflow-y-auto">
+      <div className="space-y-1 max-h-48 overflow-y-auto">
         {categories.map((cat) => (
           <button key={cat} onClick={() => setSelected(cat)}
             className={cn("w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition-colors",
@@ -52,6 +79,7 @@ function GroupCard({
   const [editing, setEditing] = useState(false);
   const [nameValue, setNameValue] = useState(mergedName);
   const [showDicoPopover, setShowDicoPopover] = useState(false);
+  const [dicoAnchorRect, setDicoAnchorRect] = useState(null);
   const [showROR, setShowROR] = useState(false);
 
   const activeCount = variantSelected.filter(Boolean).length;
@@ -143,7 +171,11 @@ function GroupCard({
               {!isFromDictionary && dictionaryCategories?.length > 0 && (
                 <div className="relative">
                   <button
-                    onClick={() => { setShowDicoPopover((s) => !s); setShowROR(false); }}
+                    onClick={(e) => {
+                      setDicoAnchorRect(e.currentTarget.getBoundingClientRect());
+                      setShowDicoPopover((s) => !s);
+                      setShowROR(false);
+                    }}
                     className={cn("p-1.5 rounded-lg border transition-colors",
                       showDicoPopover ? "bg-green-100 border-green-300" : "hover:bg-muted border-transparent")}
                     title="Ajouter au dictionnaire"
@@ -154,6 +186,7 @@ function GroupCard({
                     {showDicoPopover && (
                       <AddToDictionaryPopover
                         categories={dictionaryCategories}
+                        anchorRect={dicoAnchorRect}
                         onAdd={(cat) => { onAddToDictionary(index, cat, nameValue); setShowDicoPopover(false); }}
                         onClose={() => setShowDicoPopover(false)}
                       />
@@ -274,8 +307,17 @@ export default function FusionReview({ groups: initialGroups, onComplete, onRean
         ...initialGroups[oi],
         merged_name: mergedNames[oi],
         variants: initialGroups[oi].variants.filter((_, vi) => variantSelected[oi][vi]),
+        category: initialGroups[oi].category || "Affiliations",
       }))
       .filter((g, idx) => groupSelected[filteredOriginalIndices[idx]] && g.variants.length >= 2);
+
+    // ── Ajout automatique au dictionnaire ──────────────────────
+    if (dictionaryProps?.addEntries) {
+      approved.forEach((g) => {
+        dictionaryProps.addEntries(g.category, g.variants, g.merged_name);
+      });
+    }
+
     onComplete(approved);
   };
 
