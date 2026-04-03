@@ -261,7 +261,11 @@ affiliations_merger/
 ---
 
 
-## Exemple de traitement 
+## Exemple de traitement que fait l'application avec le fichier importé
+
+![Exemple](https://raw.githubusercontent.com/Inria-Datalake/Affiliations_merger/refs/heads/main/docs/exemple_traitement.png)
+
+
 ## Contribuer
 
 Les contributions sont les bienvenues ! N'hésitez pas à ouvrir une *issue* ou une *pull request* sur votre fork.
