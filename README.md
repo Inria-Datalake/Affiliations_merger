@@ -260,6 +260,8 @@ affiliations_merger/
 
 ---
 
+
+## Exemple de traitement 
 ## Contribuer
 
 Les contributions sont les bienvenues ! N'hésitez pas à ouvrir une *issue* ou une *pull request* sur votre fork.
