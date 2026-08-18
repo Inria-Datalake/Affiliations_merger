@@ -2,43 +2,83 @@
 
 > Application web permettant de **fusionner, comparer et valider des affiliations** à partir d'un fichier CSV ou Excel, grâce à l'intelligence artificielle.
 
-Développée par [Inria Datalake](https://github.com/Inria-Datalake) · Créée par Andréa NEBOT
+Développée par [Inria Datalake](https://github.com/Inria-Datalake) · Créée par Andréa NEBOT — Groupe DATALAKE
 
 ---
 
 ## Aperçu
 
+L'application guide l'utilisateur à travers **4 étapes simples** :
+
 ### Étape 1 — Import du fichier
 
-![Import](https://raw.githubusercontent.com/Inria-Datalake/Affiliations_merger/main/docs/screenshot-import.png)
+![Import](https://base44.app/api/apps/6a840ff8c52227525cd9ccb1/files/mp/public/6a840ff8c52227525cd9ccb1/04940acb5_screenshot-import.png)
 
-Importez votre fichier Excel ou CSV, sélectionnez la colonne à analyser et consultez les statistiques détectées (nombre de lignes, colonnes, dénominations uniques).
+Importez votre fichier Excel ou CSV par glisser-déposer, sélectionnez la colonne à analyser et consultez les statistiques détectées (nombre de lignes, colonnes, dénominations uniques). Vous pouvez aussi configurer le mode de traitement (appel unique ou par lots de 50) et le seuil de confiance minimum.
 
-### Étape 3 — Validation des fusions
+### Étape 2 — Validation des fusions
 
-![Validation](https://raw.githubusercontent.com/Inria-Datalake/Affiliations_merger/main/docs/screenshot-validation.png)
+![Validation](https://base44.app/api/apps/6a840ff8c52227525cd9ccb1/files/mp/public/6a840ff8c52227525cd9ccb1/b926d4788_screenshot-validation.png)
 
-Passez en revue les groupes proposés par l'IA : acceptez ou rejetez chaque groupe, excluez des variantes individuellement, renommez le nom fusionné, et filtrez par seuil de confiance.
+Passez en revue les groupes proposés par l'IA : acceptez ou rejetez chaque groupe, excluez des variantes individuellement, renommez le nom fusionné, et filtrez par seuil de confiance. Chaque variante affiche le nombre de publications concernées.
+
+### Étape 3 — Scission IA des affiliations multi-organismes
+
+![Scission IA](https://base44.app/api/apps/6a840ff8c52227525cd9ccb1/files/mp/public/6a840ff8c52227525cd9ccb1/15c68a7a1_screenshot-split-ia.png)
+
+Lorsqu'une affiliation contient plusieurs organismes (ex: "CSAIL Massachusetts Institute of Technology google deepmind meta"), cliquez sur **Scinder** puis utilisez la **détection IA** pour identifier automatiquement les entités distinctes. L'IA reconnaît les filiales — "Google DeepMind" reste une seule entité, pas deux.
+
+### Étape 4 — Export des résultats
+
+![Export](https://base44.app/api/apps/6a840ff8c52227525cd9ccb1/files/mp/public/6a840ff8c52227525cd9ccb1/f7f1cc822_screenshot-export.png)
+
+Téléchargez le résultat en CSV ou en Excel coloré. Le fichier contient toutes vos colonnes originales + une colonne `Affiliation_Fusionnee` + une colonne `ROR_ID`. Les lignes issues de scissions sont surlignées en jaune, les affiliations fusionnées en bleu clair.
 
 ---
 
 ## Fonctionnalités
 
-- Import de fichiers `.csv`, `.xlsx`, `.xls`
-- Sélection de la colonne à analyser (détection automatique)
+### Import & analyse
+- Import de fichiers `.csv`, `.xlsx`, `.xls` par glisser-déposer
+- Sélection de la colonne à analyser (détection automatique de la colonne "Affiliation")
 - Statistiques à l'import : lignes, colonnes, dénominations uniques
 - Pré-traitement automatique : déduplication exacte et détection des affiliations multi-organismes
+- Mode de traitement au choix : appel unique (rapide) ou par lots de 50 (fiable pour grands volumes)
+- Seuil de confiance minimum ajustable (slider 0–95%)
+
+### Fusion par IA
 - Détection automatique des affiliations similaires par un LLM (Mistral, OpenAI, Claude, Groq)
-- Validation manuelle des fusions proposées :
-  - Sélection / désélection par groupe et par variante individuelle
-  - Renommage du nom fusionné proposé
-  - Vérification dans le registre officiel **ROR** (Research Organization Registry)
-  - Filtre par seuil de confiance (slider 0–99%)
-  - Barre de recherche par groupe ou variante
-  - Bouton **Ré-analyser** pour relancer sans réimporter
-- Dictionnaire personnel d'affiliations (persistance sur disque, import/export JSON)
-- Export CSV enrichi avec une colonne `Affiliation_Fusionnee`
-- Possibilité de relancer un second tour de fusion sur la colonne fusionnée
+- Dictionnaire personnel : les fusions validées sont mémorisées et réutilisées automatiquement
+- Gestion par catégories (Affiliations, Pays, Laboratoires, etc.) + catégories personnalisées
+- Persistance sur disque (`dictionary.json`) ou en `localStorage` (si serveur indisponible)
+- Import/export du dictionnaire en JSON
+
+### Validation & contrôle
+- Sélection / désélection par groupe et par variante individuelle
+- Renommage du nom fusionné proposé
+- Vérification dans le registre officiel **ROR** (Research Organization Registry)
+- Filtre par seuil de confiance avec distribution visuelle (élevé / moyen / faillible)
+- Barre de recherche par groupe ou variante
+- Bouton **Ré-analyser** pour relancer sans réimporter
+- Ajout manuel d'une fusion validée au dictionnaire (choix de la catégorie)
+
+### Scission intelligente des multi-affiliations
+- Détection IA des organismes distincts dans une chaîne d'affiliation
+- Reconnaissance des **filiales** (ex: "Google DeepMind" = 1 entité, pas "Google" + "DeepMind")
+- Score de confiance par entité détectée + raisonnement explicite de l'IA
+- Édition manuelle des propositions de l'IA (ajouter, modifier, supprimer)
+- Suivi des **publications concernées** : compteur par variante + récapitulatif à l'export
+
+### Export
+- Export CSV enrichi avec colonne `Affiliation_Fusionnee` + `ROR_ID`
+- Export **Excel coloré** (.xls) :
+  - Bleu `#2563EB` pour l'en-tête de la colonne fusionnée
+  - Bleu ciel `#60A5FA` pour l'en-tête de la colonne ROR
+  - Bleu clair `#DBEAFE` pour les cellules fusionnées
+  - Jaune `#FFFACD` pour les lignes ajoutées par scission
+- Une ligne par affiliation dans l'export (les scissions génèrent des lignes supplémentaires)
+- Tableau récapitulatif "Publications concernées par les scissions"
+- Possibilité de relancer un **second tour de fusion** sur la colonne fusionnée
 
 ---
 
@@ -176,7 +216,7 @@ const response = await fetch("https://api.anthropic.com/v1/messages", {
     "anthropic-dangerous-direct-browser-calls": "true",
   },
   body: JSON.stringify({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-3-5-sonnet-20241022",
     max_tokens: 4096,
     system: systemPrompt,
     messages: [{ role: "user", content: prompt }],
@@ -217,6 +257,8 @@ L'application accepte `.csv`, `.xlsx` et `.xls`. Votre fichier peut contenir **n
 | 2 | Martin | Univ. Lyon | 2023 |
 | 3 | Leroy | INRIA Grenoble | 2022 |
 
+> 💡 **Astuce** : Plus votre fichier contient de lignes avec des affiliations similaires (variantes, abréviations), plus l'IA sera efficace pour détecter les fusions pertinentes.
+
 ---
 
 ## Dictionnaire d'affiliations
@@ -226,6 +268,31 @@ L'application intègre un dictionnaire personnel qui mémorise vos fusions valid
 - **Export JSON** : partagez votre dictionnaire avec vos collègues
 - **Import JSON** : chargez un dictionnaire existant
 - **Catégories** : Affiliations, Pays, Laboratoires, Établissements + catégories personnalisées
+- **Sauvegarde automatique** : chaque fusion validée est ajoutée au dictionnaire
+
+---
+
+## Scission des affiliations multi-organismes
+
+Certaines chaînes d'affiliation contiennent plusieurs organismes concaténés sans séparateur clair. Par exemple :
+
+```
+CSAIL Massachusetts Institute of Technology google deepmind meta
+```
+
+L'application permet de **scinder** ces chaînes en affiliations distinctes :
+
+1. Dans l'écran de validation, **désélectionnez** la variante concernée
+2. Cliquez sur le bouton **Scinder** qui apparaît
+3. Utilisez le bouton **Détection IA** pour une analyse automatique
+4. L'IA identifie les entités distinctes et reconnaît les filiales :
+   - `CSAIL` → entité distincte
+   - `Massachusetts Institute of Technology` → entité distincte
+   - `Google DeepMind` → **une seule entité** (DeepMind est une filiale de Google)
+   - `Meta` → entité distincte
+5. Vérifiez le résultat, modifiez si besoin, puis validez
+
+Chaque affiliation scindée génère **une ligne supplémentaire** dans le fichier d'export, de sorte que chaque publication apparaît avec toutes ses affiliations individuelles.
 
 ---
 
@@ -236,6 +303,11 @@ affiliations_merger/
 ├── server.js                   # Serveur Express (persistance dictionnaire)
 ├── dictionary.json             # Dictionnaire local (créé automatiquement)
 ├── .env.local                  # Clé API (non versionné)
+├── docs/                       # Screenshots et documentation
+│   ├── screenshot-import.png
+│   ├── screenshot-validation.png
+│   ├── screenshot-split-ia.png
+│   └── screenshot-export.png
 └── src/
     ├── api/
     │   └── llmClient.js        # Client LLM (Mistral par défaut)
@@ -244,27 +316,49 @@ affiliations_merger/
     │   └── useROR.js           # Intégration ROR
     ├── components/
     │   ├── merger/
-    │   │   ├── AnalysisLoader.jsx
-    │   │   ├── DictionaryManager.jsx
-    │   │   ├── ExportResult.jsx
-    │   │   ├── FileUpload.jsx
-    │   │   ├── FusionReview.jsx
-    │   │   ├── PreProcessReport.jsx
-    │   │   ├── RORSearch.jsx
-    │   │   └── Stepper.jsx
+    │   │   ├── AnalysisLoader.jsx     # Écran de chargement
+    │   │   ├── DictionaryManager.jsx   # Gestion du dictionnaire
+    │   │   ├── ExportResult.jsx       # Écran d'export
+    │   │   ├── FileUpload.jsx         # Écran d'import
+    │   │   ├── FusionReview.jsx       # Validation + scission IA
+    │   │   ├── PreProcessReport.jsx   # Rapport de pré-traitement
+    │   │   ├── RORSearch.jsx          # Recherche ROR
+    │   │   └── Stepper.jsx            # Barre de progression
     │   └── ui/                 # Composants shadcn/ui
     ├── pages/
-    │   └── AffiliationMerger.jsx
+    │   └── AffiliationMerger.jsx      # Page principale (orchestrateur)
     └── App.jsx
 ```
 
 ---
 
+## Exemple de traitement
 
-## Exemple de traitement que fait l'application avec le fichier importé
+Voici un exemple concret du traitement effectué par l'application :
 
-![Exemple](https://raw.githubusercontent.com/Inria-Datalake/Affiliations_merger/refs/heads/main/docs/exemple_traitement.png)
+**Fichier d'entrée** (extrait) :
 
+| Auteur | Affiliations |
+|--------|-------------|
+| Alice | Univ. Lyon ; INRIA |
+| Bob | University of Lyon |
+| Charlie | INRIA Grenoble ; CSAIL MIT google deepmind |
+
+**Après traitement** :
+
+| Auteur | Affiliations | Affiliation_Fusionnee | ROR_ID |
+|--------|-------------|----------------------|--------|
+| Alice | Univ. Lyon ; INRIA | Université de Lyon | https://ror.org/029brtt94 |
+| Alice | Univ. Lyon ; INRIA | Inria | https://ror.org/02kv1f702 |
+| Bob | University of Lyon | Université de Lyon | https://ror.org/029brtt94 |
+| Charlie | INRIA Grenoble ; CSAIL MIT google deepmind | Inria | https://ror.org/02kv1f702 |
+| Charlie | INRIA Grenoble ; CSAIL MIT google deepmind | CSAIL | |
+| Charlie | INRIA Grenoble ; CSAIL MIT google deepmind | Massachusetts Institute of Technology | https://ror.org/042nb2s44 |
+| Charlie | INRIA Grenoble ; CSAIL MIT google deepmind | Google DeepMind | |
+
+> 📝 Dans cet exemple, "Univ. Lyon" et "University of Lyon" sont fusionnées en "Université de Lyon", et la chaîne de Charlie est scindée en 4 affiliations distinctes. "Google DeepMind" est reconnu comme une seule entité (filiale de Google).
+
+---
 
 ## Contribuer
 
@@ -274,4 +368,4 @@ Les contributions sont les bienvenues ! N'hésitez pas à ouvrir une *issue* ou 
 
 ## Licence
 
-Ce projet est développé par [Inria Datalake](https://github.com/Inria-Datalake).
+Ce projet est développé par [Inria Datalake](https://github.com/Inria-Datalake) · Créée par Andréa NEBOT — Groupe DATALAKE.
