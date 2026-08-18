@@ -6,7 +6,6 @@
  * Nécessite dans .env.local :
  *   VITE_MISTRAL_API_KEY=ta_clé_mistral
  */
-
 const MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions";
 const MODEL = "mistral-small-latest"; // Rapide et gratuit — peut être remplacé par "open-mistral-7b" pour encore plus de vitesse
 
