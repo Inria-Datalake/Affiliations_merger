@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { invokeLLM } from "@/api/llmClient";
-import { GitMerge } from "lucide-react";
+import { GitMerge, BookOpen } from "lucide-react";
 import Stepper from "../components/merger/Stepper";
 import FileUpload from "../components/merger/FileUpload";
 import AnalysisLoader from "../components/merger/AnalysisLoader";
@@ -127,51 +127,115 @@ export default function AffiliationMerger() {
   const stepperStep = step === STEP_PREPROCESS ? 0 : step;
 
   return (
-    <div className="min-h-screen" style={{ background: "linear-gradient(135deg, #F0F7FF 0%, #E0F2FE 40%, #F0FDFA 100%)" }}>
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-10 shadow-sm">
+    <div className="min-h-screen flex flex-col" style={{ background: "linear-gradient(135deg, #F0F7FF 0%, #E0F2FE 40%, #F0FDFA 100%)" }}>
+
+      {/* ═══ Header ═══════════════════════════════════════════════ */}
+      <header className="border-b bg-white/80 backdrop-blur-md sticky top-0 z-20 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-4">
-          <img src="https://raw.githubusercontent.com/Inria-Datalake/Copublications/refs/heads/main/dashboard/assets/logo_inria.png" alt="Inria" className="h-10 w-auto object-contain"
-            onError={(e) => { const img = e.currentTarget; img.style.display = "none"; const fb = img.nextSibling; if (fb) fb.style.display = "flex"; }} />
+          {/* Logo Inria */}
+          <img
+            src="https://raw.githubusercontent.com/Inria-Datalake/Copublications/refs/heads/main/dashboard/assets/logo_inria.png"
+            alt="Inria"
+            className="h-10 w-auto object-contain"
+            onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextSibling.style.display = "flex"; }}
+          />
           <div style={{ display: "none" }} className="items-center gap-1">
             <div className="w-8 h-8 rounded-xl bg-[#E3051B] flex items-center justify-center text-white font-black text-lg">i</div>
             <span className="font-black text-xl tracking-tight">nria</span>
           </div>
-          <div className="flex items-center gap-2 ml-4 flex-1">
-            <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center"><GitMerge className="w-4 h-4 text-primary-foreground" /></div>
+
+          {/* Séparateur */}
+          <div className="w-px h-8 bg-border" />
+
+          {/* Titre app */}
+          <div className="flex items-center gap-2 flex-1">
+            <div className="w-9 h-9 rounded-2xl flex items-center justify-center shadow-sm" style={{ background: "#2563EB" }}>
+              <GitMerge className="w-4.5 h-4.5 text-white" />
+            </div>
             <div>
               <h1 className="text-base font-bold tracking-tight leading-tight">Affiliation Merger</h1>
-              <p className="text-[11px] text-muted-foreground leading-none">
-                Fusionnez les affiliations similaires grâce à l'IA
-                {fusionRound > 1 && <span className="ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-semibold" style={{ background: "rgba(37,99,235,0.1)", color: "#2563EB" }}>Tour {fusionRound}</span>}
+              <p className="text-[11px] text-muted-foreground leading-none mt-0.5">
+                Fusionnez les affiliations grâce à l'IA
+                {fusionRound > 1 && (
+                  <span className="ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-semibold" style={{ background: "rgba(37,99,235,0.1)", color: "#2563EB" }}>
+                    Tour {fusionRound}
+                  </span>
+                )}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {dictionary.totalEntries > 0 && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium" style={{ background: "rgba(37,99,235,0.08)", color: "#2563EB" }}>
-                <span>BOOK</span><span>{dictionary.totalEntries} entrées</span>
-              </div>
-            )}
-          </div>
+
+          {/* Badge dictionnaire */}
+          {dictionary.totalEntries > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium" style={{ background: "rgba(37,99,235,0.08)", color: "#2563EB" }}>
+              <BookOpen className="w-3.5 h-3.5" />
+              {dictionary.totalEntries} entrées
+            </div>
+          )}
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* ═══ Main ═════════════════════════════════════════════════ */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
         <Stepper currentStep={stepperStep} />
-        {step === STEP_IMPORT && <FileUpload onFileProcessed={handleFileProcessed} dictionaryProps={dictionary} />}
+
+        {step === STEP_IMPORT && (
+          <FileUpload onFileProcessed={handleFileProcessed} dictionaryProps={dictionary} />
+        )}
+
         {step === STEP_PREPROCESS && preProcessData && (
           <div className="space-y-4">
-            <PreProcessReport exactDuplicates={preProcessData.exactDuplicates} multiOrgCandidates={preProcessData.multiOrgCandidates} knownFromDictionary={preProcessData.knownFromDictionary} totalBefore={preProcessData.totalBefore} totalAfterDedup={preProcessData.totalAfterDedup} onSplitMultiOrg={preProcessData.multiOrgCandidates.length > 0 ? handleSplitMultiOrg : null} onSkip={handleSkipPreProcess} />
+            <PreProcessReport
+              exactDuplicates={preProcessData.exactDuplicates}
+              multiOrgCandidates={preProcessData.multiOrgCandidates}
+              knownFromDictionary={preProcessData.knownFromDictionary}
+              totalBefore={preProcessData.totalBefore}
+              totalAfterDedup={preProcessData.totalAfterDedup}
+              onSplitMultiOrg={preProcessData.multiOrgCandidates.length > 0 ? handleSplitMultiOrg : null}
+              onSkip={handleSkipPreProcess}
+            />
             {preProcessData.multiOrgCandidates.length === 0 && (
-              <button onClick={handleSkipPreProcess} className="w-full py-3 rounded-xl text-white text-sm font-medium transition-opacity hover:opacity-90 shadow-sm" style={{ background: "#2563EB" }}>Continuer vers l'analyse →</button>
+              <button
+                onClick={handleSkipPreProcess}
+                className="w-full py-3 rounded-xl text-white text-sm font-medium transition-opacity hover:opacity-90 shadow-sm"
+                style={{ background: "#2563EB" }}
+              >
+                Continuer vers l'analyse →
+              </button>
             )}
           </div>
         )}
+
         {step === STEP_ANALYSIS && <AnalysisLoader progress={progress} />}
-        {step === STEP_REVIEW && <FusionReview groups={fusionGroups} onComplete={handleFusionComplete} onReanalyze={handleReanalyze} initialMinConfidence={analysisOptions.minConfidence} dictionaryProps={dictionary} rawData={rawData} selectedColumn={selectedColumn} />}
-        {step === STEP_EXPORT && <ExportResult approvedFusions={approvedFusions} originalAffiliations={affiliations} rawData={rawData} selectedColumn={selectedColumn} onRestart={handleRestart} onReprocess={handleReprocess} analysisOptions={analysisOptions} variantSplits={variantSplits} rorIds={rorIds} />}
+
+        {step === STEP_REVIEW && (
+          <FusionReview
+            groups={fusionGroups}
+            onComplete={handleFusionComplete}
+            onReanalyze={handleReanalyze}
+            initialMinConfidence={analysisOptions.minConfidence}
+            dictionaryProps={dictionary}
+            rawData={rawData}
+            selectedColumn={selectedColumn}
+          />
+        )}
+
+        {step === STEP_EXPORT && (
+          <ExportResult
+            approvedFusions={approvedFusions}
+            originalAffiliations={affiliations}
+            rawData={rawData}
+            selectedColumn={selectedColumn}
+            onRestart={handleRestart}
+            onReprocess={handleReprocess}
+            analysisOptions={analysisOptions}
+            variantSplits={variantSplits}
+            rorIds={rorIds}
+          />
+        )}
       </main>
 
+      {/* ═══ Footer ═══════════════════════════════════════════════ */}
       <footer className="border-t bg-white/60 backdrop-blur-sm mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 text-center">
           <p className="text-xs text-muted-foreground">
