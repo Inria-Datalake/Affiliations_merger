@@ -54,6 +54,7 @@ export default function AffiliationMerger() {
   const [pendingAffiliations, setPendingAffiliations] = useState([]);
   const [variantSplits, setVariantSplits] = useState({});
   const [rorIds, setRorIds] = useState({});
+  const [analysisError, setAnalysisError] = useState(null);
 
   const dictionary = useDictionary();
 
@@ -69,14 +70,26 @@ export default function AffiliationMerger() {
   }, []);
 
   const runFullAnalysis = useCallback(async (uniqueAffiliations, options = {}) => {
-    const { knownGroups, unknownAffiliations } = dictionary.preProcess(uniqueAffiliations);
-    const iaGroups = await runIAAnalysis(unknownAffiliations, options);
-    const allGroups = [...knownGroups, ...iaGroups];
-    setFusionGroups(allGroups);
-    setAnalysisOptions(options);
-    if (allGroups.length === 0) { setApprovedFusions([]); setStep(STEP_EXPORT); }
-    else setStep(STEP_REVIEW);
+    setAnalysisError(null);
+    try {
+      const { knownGroups, unknownAffiliations } = dictionary.preProcess(uniqueAffiliations);
+      const iaGroups = await runIAAnalysis(unknownAffiliations, options);
+      const allGroups = [...knownGroups, ...iaGroups];
+      setFusionGroups(allGroups);
+      setAnalysisOptions(options);
+      if (allGroups.length === 0) { setApprovedFusions([]); setStep(STEP_EXPORT); }
+      else setStep(STEP_REVIEW);
+    } catch (err) {
+      console.error("Erreur pendant l'analyse IA :", err);
+      setAnalysisError(err?.message || "Erreur inconnue pendant l'analyse.");
+      setStep(STEP_ANALYSIS);
+    }
   }, [dictionary, runIAAnalysis]);
+
+  const handleRetryAnalysis = useCallback(async () => {
+    if (affiliations.length === 0) { setStep(STEP_IMPORT); return; }
+    await runFullAnalysis(affiliations, analysisOptions);
+  }, [affiliations, analysisOptions, runFullAnalysis]);
 
   const handleFileProcessed = useCallback((uniqueAffiliations, rawData, selectedColumn, options) => {
     setAffiliations(uniqueAffiliations); setRawData(rawData); setSelectedColumn(selectedColumn); setFusionRound(1); setAnalysisOptions(options); setVariantSplits({}); setRorIds({});
@@ -206,7 +219,7 @@ export default function AffiliationMerger() {
           </div>
         )}
 
-        {step === STEP_ANALYSIS && <AnalysisLoader progress={progress} />}
+        {step === STEP_ANALYSIS && <AnalysisLoader progress={progress} error={analysisError} onRetry={handleRetryAnalysis} onRestart={handleRestart} />}
 
         {step === STEP_REVIEW && (
           <FusionReview
