@@ -10,7 +10,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 
 const STORAGE_KEY = "affiliation_merger_dictionary";
-const SERVER_URL = "http://localhost:3001/api/dictionary";
+const SERVER_URL = `${import.meta.env.BASE_URL}api/dictionary`;
 const PREDEFINED_CATEGORIES = ["Affiliations", "Pays", "Laboratoires", "Établissements"];
 
 const DEFAULT_DICTIONARY = {

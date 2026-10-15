@@ -53,10 +53,8 @@ if (!fs.existsSync(OUTPUTS_DIR)) fs.mkdirSync(OUTPUTS_DIR, { recursive: true });
 // ── Middleware ─────────────────────────────────────────────────────────────
 app.use(express.json({ limit: "50mb" }));
 
+// L'interface et l'API sont servies sous le même domaine en production.
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "http://localhost:5173");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
@@ -332,8 +330,114 @@ app.get("/api/outputs", (req, res) => {
   }
 });
 
+
+// Limitation locale des appels Mistral
+const LLM_MIN_INTERVAL_MS = 2000;
+const LLM_MAX_PENDING = 8;
+let llmQueue = Promise.resolve();
+let llmPending = 0;
+let lastLlmStart = 0;
+
+function runLlmRequest(task) {
+  if (llmPending >= LLM_MAX_PENDING) {
+    const err = new Error("Le service IA est très sollicité. Réessayez dans quelques instants.");
+    err.code = "LLM_QUEUE_FULL";
+    return Promise.reject(err);
+  }
+
+  llmPending++;
+  const result = llmQueue.then(async () => {
+    const waitMs = Math.max(
+      0,
+      LLM_MIN_INTERVAL_MS - (Date.now() - lastLlmStart)
+    );
+    if (waitMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
+    lastLlmStart = Date.now();
+    return task();
+  });
+
+  llmQueue = result.catch(() => {}).finally(() => {
+    llmPending--;
+  });
+
+  return result;
+}
+
+// ── POST /api/llm : relais sécurisé vers Mistral ───────────────────────────
+app.post("/api/llm", async (req, res) => {
+  const apiKey = process.env.MISTRAL_API_KEY;
+  if (!apiKey) {
+    return res.status(503).json({ error: "La clé API Mistral n'est pas configurée côté serveur." });
+  }
+
+  const { prompt, response_json_schema } = req.body || {};
+  if (typeof prompt !== "string" || !prompt.trim()) {
+    return res.status(400).json({ error: "Le champ prompt est obligatoire." });
+  }
+  if (prompt.length > 200000) {
+    return res.status(413).json({ error: "Le prompt est trop volumineux." });
+  }
+
+  const systemPrompt = response_json_schema
+    ? `Tu dois répondre UNIQUEMENT avec un objet JSON valide, sans texte avant ni après, sans balises markdown ni backticks. Le JSON doit respecter ce schéma : ${JSON.stringify(response_json_schema, null, 2)}`
+    : "Tu es un assistant utile.";
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 180000);
+
+  try {
+    const upstream = await runLlmRequest(() =>
+      fetch("https://api.mistral.ai/v1/chat/completions", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "mistral-small-latest",
+          temperature: 0.1,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt },
+          ],
+        }),
+      })
+    );
+
+    const data = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) {
+      console.error("Erreur API Mistral :", upstream.status);
+      return res.status(upstream.status >= 500 ? 502 : upstream.status).json({
+        error: data?.message || "La requête Mistral a échoué.",
+      });
+    }
+
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== "string" || !content.trim()) {
+      return res.status(502).json({ error: "Réponse vide de Mistral." });
+    }
+    return res.json({ content });
+  } catch (err) {
+    if (err?.code === "LLM_QUEUE_FULL") {
+      res.set("Retry-After", "10");
+      return res.status(503).json({ error: err.message });
+    }
+    const message = err?.name === "AbortError"
+      ? "Délai dépassé lors de l'appel à Mistral."
+      : "Impossible de contacter l'API Mistral.";
+    console.error(message);
+    return res.status(502).json({ error: message });
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
 // ── Démarrage ──────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+app.listen(PORT, "127.0.0.1", () => {
   console.log(`\n📚 Serveur Affiliation Merger démarré sur http://localhost:${PORT}`);
   console.log(`   Python     : ${VENV_PYTHON}`);
   console.log(`   Script     : ${PYTHON_SCRIPT}`);

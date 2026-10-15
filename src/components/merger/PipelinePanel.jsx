@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const SERVER = "http://localhost:3001";
+const SERVER = `${import.meta.env.BASE_URL.slice(0, -1)}`;
 const POLL_INTERVAL_MS = 1200;
 
 // ── Badge de statut dépendance ─────────────────────────────────────────────

@@ -1,115 +1,77 @@
 /**
- * llmClient.js
- * Appelle l'API Mistral pour l'analyse des affiliations.
- * Modèle : mistral-small-latest
- *
- * Nécessite dans .env.local :
- *   VITE_MISTRAL_API_KEY=ta_clé_mistral
+ * Client LLM de l'application.
+ * Les appels à Mistral passent par le serveur local :
+ * aucune clé API n'est exposée dans le navigateur.
  */
 
-const MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions";
-const MODEL = "mistral-small-latest";
-
-// Timeout des appels API (3 minutes par lot)
 const REQUEST_TIMEOUT_MS = 180000;
-
-// Nombre max de tentatives en cas d'erreur réseau / rate limit
 const MAX_RETRIES = 3;
 
-// Marqueur d'erreur non retentable (clé invalide, prompt trop gros...)
 function fatal(message) {
-  const e = new Error(message);
-  e.fatal = true;
-  return e;
+  const error = new Error(message);
+  error.fatal = true;
+  return error;
 }
 
-/**
- * Appelle Mistral avec un prompt et retourne un objet JSON.
- * Gère : timeout, retry avec backoff, erreurs explicites.
- *
- * @param {Object} options
- * @param {string} options.prompt
- * @param {Object} options.response_json_schema
- * @returns {Promise<Object>}
- */
 export async function invokeLLM({ prompt, response_json_schema }) {
-  const apiKey = import.meta.env.VITE_MISTRAL_API_KEY;
-
-  if (!apiKey) {
-    throw fatal(
-      "Clé API Mistral manquante. Ajoutez VITE_MISTRAL_API_KEY dans votre fichier .env.local puis relancez « npm run start »."
-    );
+  if (typeof prompt !== "string" || !prompt.trim()) {
+    throw fatal("Le prompt envoyé à l'IA est vide.");
   }
-
-  const systemPrompt = response_json_schema
-    ? `Tu dois répondre UNIQUEMENT avec un objet JSON valide, sans texte avant ni après, sans balises markdown ni backticks. Le JSON doit respecter ce schéma : ${JSON.stringify(
-        response_json_schema,
-        null,
-        2
-      )}`
-    : "Tu es un assistant utile.";
 
   let lastError = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      REQUEST_TIMEOUT_MS
+    );
 
     try {
-      const response = await fetch(MISTRAL_API_URL, {
+      const response = await fetch(`${import.meta.env.BASE_URL}api/llm`, {
         method: "POST",
         signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          temperature: 0.1,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: prompt },
-          ],
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, response_json_schema }),
       });
 
       clearTimeout(timeoutId);
 
+      const data = await response.json().catch(() => ({}));
+
       if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        const apiMsg = error?.message || response.statusText;
+        const apiMsg = data?.error || response.statusText;
 
-        // ── Erreurs FATALES : on ne retente pas ──
-        if (response.status === 401 || response.status === 403) {
+        if (response.status === 429) {
           throw fatal(
-            "Clé API Mistral invalide ou expirée (erreur 401). Vérifiez votre clé sur console.mistral.ai → API Keys, puis mettez à jour VITE_MISTRAL_API_KEY dans .env.local (à la racine du projet) et relancez « npm run start »."
-          );
-        }
-        if (response.status === 413 || response.status === 422) {
-          throw fatal(
-            "Requête trop volumineuse pour l'API Mistral. Relancez l'analyse en activant le mode « Par lots de 50 » à l'étape d'import."
+            "Mistral a atteint sa limite d’utilisation (HTTP 429). " +
+            "Aucune nouvelle tentative automatique : réessayez lorsque le quota sera disponible."
           );
         }
 
-        // ── Erreurs RETENTABLES : 429 (rate limit), 5xx ──
+        if (response.status === 400 || response.status === 401 ||
+            response.status === 403 || response.status === 413 ||
+            response.status === 422 || response.status === 503) {
+          throw fatal(`Erreur lors de l'appel à l'IA (${response.status}) : ${apiMsg}`);
+        }
+
         lastError = new Error(
           response.status === 429
             ? "Limite de requêtes Mistral atteinte (429) — nouvelle tentative..."
-            : `Erreur API Mistral (${response.status}) : ${apiMsg}`
+            : `Erreur API (${response.status}) : ${apiMsg}`
         );
+
         if (attempt < MAX_RETRIES) {
-          // Backoff : 5s, 15s, 45s
-          await new Promise((r) => setTimeout(r, 5000 * Math.pow(3, attempt - 1)));
+          await new Promise((resolve) =>
+            setTimeout(resolve, 5000 * Math.pow(3, attempt - 1))
+          );
           continue;
         }
+
         throw lastError;
       }
 
-      const data = await response.json();
-      const text = data.choices?.[0]?.message?.content || "";
-
-      // Nettoyer les éventuels backticks résiduels
+      const text = data?.content || "";
       const clean = text
         .replace(/^```(?:json)?\s*/i, "")
         .replace(/\s*```$/, "")
@@ -118,35 +80,31 @@ export async function invokeLLM({ prompt, response_json_schema }) {
       try {
         return JSON.parse(clean);
       } catch {
-        // Réponse incomplète (souvent un lot trop gros) → retentable
         lastError = fatal(
-          `L'IA a renvoyé une réponse incomplète ou non parsable en JSON. Conseil : activez le mode « Par lots de 50 » à l'import. (Début de réponse : ${clean.slice(0, 100)}...)`
+          `L'IA a renvoyé une réponse non valide en JSON. Conseil : activez le mode « Par lots de 50 » à l'import. (Début de réponse : ${clean.slice(0, 100)}...)`
         );
-        if (attempt === MAX_RETRIES) throw lastError;
-        await new Promise((r) => setTimeout(r, 3000));
-        continue;
+        throw lastError;
       }
-    } catch (err) {
+    } catch (error) {
       clearTimeout(timeoutId);
 
-      // Erreurs formatées avec fatal → propagation directe, pas de retry
-      if (err.fatal) throw err;
+      if (error.fatal) throw error;
 
-      // Timeout réseau (AbortError)
-      if (err.name === "AbortError") {
-        lastError = fatal(
-          `L'appel API a dépassé ${REQUEST_TIMEOUT_MS / 1000} secondes sans réponse. Vérifiez votre connexion, ou activez le mode « Par lots de 50 » à l'étape d'import.`
+      if (error.name === "AbortError") {
+        lastError = new Error(
+          `L'appel à l'IA a dépassé ${REQUEST_TIMEOUT_MS / 1000} secondes.`
         );
-        if (attempt === MAX_RETRIES) throw lastError;
-        continue;
+      } else {
+        lastError = new Error(`Erreur réseau : ${error.message}`);
       }
 
-      // Autre erreur réseau → retentable
-      lastError = new Error(`Erreur réseau : ${err.message}`);
       if (attempt === MAX_RETRIES) throw lastError;
-      await new Promise((r) => setTimeout(r, 3000));
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, 3000)
+      );
     }
   }
 
-  throw lastError || new Error("L'appel à l'API Mistral a échoué après plusieurs tentatives.");
+  throw lastError || new Error("L'appel à l'IA a échoué après plusieurs tentatives.");
 }

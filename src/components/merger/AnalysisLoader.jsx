@@ -38,10 +38,10 @@ export default function AnalysisLoader({
             <div className="w-full rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-left">
               <p className="text-xs font-semibold text-primary mb-2">💡 Solutions possibles :</p>
               <ul className="text-xs text-muted-foreground space-y-1.5 list-disc list-inside">
-                <li>Vérifiez que <code className="font-mono">VITE_MISTRAL_API_KEY</code> est bien défini dans <code className="font-mono">.env.local</code> (à la racine du projet)</li>
-                <li>Relancez l'app après modification : <code className="font-mono">Ctrl+C</code> puis <code className="font-mono">npm run start</code></li>
-                <li>Si votre fichier contient beaucoup de lignes, utilisez le mode <strong>« Par lots de 50 »</strong> à l'import</li>
-                <li>Vérifiez votre connexion internet et le solde de votre compte <a href="https://console.mistral.ai" target="_blank" rel="noreferrer" className="text-primary underline">console.mistral.ai</a></li>
+                <li>Si la limite d’utilisation Mistral (HTTP 429) est atteinte, attendez que votre quota gratuit soit de nouveau disponible avant de relancer l’analyse.</li>
+                <li>Consultez l’utilisation de votre compte sur <a href="https://console.mistral.ai" target="_blank" rel="noreferrer" className="text-primary underline">la console Mistral</a>.</li>
+                <li>Pour les fichiers volumineux, essayez le mode <strong>« Par lots de 50 »</strong> à l’import. Cela peut réduire la taille des requêtes, sans garantir de contourner les limites du compte.</li>
+                <li>La clé API est configurée côté serveur ; il n’est pas nécessaire de la placer dans le frontend.</li>
               </ul>
             </div>
 
