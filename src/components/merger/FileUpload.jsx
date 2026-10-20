@@ -96,11 +96,9 @@ export default function FileUpload({ onFileProcessed, dictionaryProps }) {
               <div className="p-4 rounded-2xl space-y-4 border bg-card">
                 <p className="text-sm font-medium">Options d'analyse</p>
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2"><span className="text-xs font-medium text-muted-foreground">Mode de traitement</span><InfoTooltip text="Le traitement par lot découpe en groupes de 50. Le mode unique envoie tout en une requête." /></div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[{ value: false, label: "Appel unique", desc: "Rapide, 1 requête" }, { value: true, label: "Par lots de 50", desc: "Fiable, grands volumes" }].map(({ value, label, desc }) => (
-                      <button key={String(value)} onClick={() => setUseBatches(value)} className={`flex flex-col items-center p-3 rounded-xl border-2 text-xs transition-all ${useBatches === value ? "border-blue-300 bg-blue-50" : "border-border bg-card hover:bg-muted/20"}`}><span className={`font-semibold ${useBatches === value ? "text-blue-700" : "text-foreground"}`}>{label}</span><span className="text-muted-foreground mt-0.5">{desc}</span></button>
-                    ))}
+                  <div className="flex items-center gap-2"><span className="text-xs font-medium text-muted-foreground">Mode de traitement</span><InfoTooltip text="Le découpage est automatique selon la taille du prompt afin de limiter les risques de dépassement de tokens." /></div>
+                  <div className="rounded-xl border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    Découpage automatique des affiliations en lots adaptés à la taille des requêtes.
                   </div>
                 </div>
                 <div className="space-y-2">

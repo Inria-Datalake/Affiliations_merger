@@ -365,11 +365,11 @@ function runLlmRequest(task) {
   return result;
 }
 
-// ── POST /api/llm : relais sécurisé vers Mistral ───────────────────────────
+// ── POST /api/llm : relais sécurisé vers Albert ────────────────────────────
 app.post("/api/llm", async (req, res) => {
-  const apiKey = process.env.MISTRAL_API_KEY;
+  const apiKey = process.env.ALBERT_API_KEY;
   if (!apiKey) {
-    return res.status(503).json({ error: "La clé API Mistral n'est pas configurée côté serveur." });
+    return res.status(503).json({ error: "La clé API Albert n'est pas configurée côté serveur." });
   }
 
   const { prompt, response_json_schema } = req.body || {};
@@ -386,10 +386,11 @@ app.post("/api/llm", async (req, res) => {
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 180000);
+  const model = "mistral-small-3-2-24b-instruct-2506";
 
   try {
     const upstream = await runLlmRequest(() =>
-      fetch("https://api.mistral.ai/v1/chat/completions", {
+      fetch("https://albert.api.etalab.gouv.fr/v1/chat/completions", {
         method: "POST",
         signal: controller.signal,
         headers: {
@@ -397,7 +398,7 @@ app.post("/api/llm", async (req, res) => {
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: "mistral-small-latest",
+          model,
           temperature: 0.1,
           response_format: { type: "json_object" },
           messages: [
@@ -410,25 +411,30 @@ app.post("/api/llm", async (req, res) => {
 
     const data = await upstream.json().catch(() => ({}));
     if (!upstream.ok) {
-      console.error("Erreur API Mistral :", upstream.status);
+      console.error("Erreur API Albert :", upstream.status);
       return res.status(upstream.status >= 500 ? 502 : upstream.status).json({
-        error: data?.message || "La requête Mistral a échoué.",
+        error: "La requête Albert a échoué.",
       });
     }
 
     const content = data?.choices?.[0]?.message?.content;
     if (typeof content !== "string" || !content.trim()) {
-      return res.status(502).json({ error: "Réponse vide de Mistral." });
+      return res.status(502).json({ error: "Réponse vide d'Albert." });
     }
-    return res.json({ content });
+
+    return res.json({
+      content,
+      usage: data?.usage ?? null,
+      model: data?.model ?? model,
+    });
   } catch (err) {
     if (err?.code === "LLM_QUEUE_FULL") {
       res.set("Retry-After", "10");
       return res.status(503).json({ error: err.message });
     }
     const message = err?.name === "AbortError"
-      ? "Délai dépassé lors de l'appel à Mistral."
-      : "Impossible de contacter l'API Mistral.";
+      ? "Délai dépassé lors de l'appel à Albert."
+      : "Impossible de contacter l'API Albert.";
     console.error(message);
     return res.status(502).json({ error: message });
   } finally {

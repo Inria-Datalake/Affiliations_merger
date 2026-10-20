@@ -9,27 +9,103 @@ import ExportResult from "../components/merger/ExportResult";
 import PreProcessReport from "../components/merger/PreProcessReport";
 import { useDictionary } from "../hooks/useDictionary";
 
-function chunkArray(arr, size) { const chunks = []; for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size)); return chunks; }
+const MAX_PROMPT_CHARS = 60000;
 
-async function analyzeBatch(batch) {
+function buildAnalysisPrompt(batch) {
+  return "Tu es un expert en analyse de donnees bibliometriques. Voici une liste d'affiliations extraites d'un fichier.\nAnalyse cette liste et identifie les groupes d'affiliations qui representent la MEME organisation mais ecrites differemment (variantes, abreviations, filiales, etc.).\n\nPour chaque groupe trouve :\n- Liste toutes les variantes (uniquement parmi les affiliations fournies)\n- Propose un nom fusionne (le plus standard/officiel possible)\n- Donne un score de confiance entre 0 et 1\n\nIMPORTANT :\n- Ne fusionne que si tu es CERTAIN que ce sont les memes organisations.\n- Ne regroupe PAS des organisations differentes qui collaborent souvent ensemble.\n- Ne cree pas de groupes avec une seule variante.\n- Sois conservateur : mieux vaut ne pas fusionner que mal fusionner.\n\nListe des affiliations :\n" + batch.join("\n");
+}
+
+function buildBatchesByPromptSize(affiliations) {
+  const batches = [];
+  let current = [];
+
+  for (const affiliation of affiliations) {
+    const candidate = [...current, affiliation];
+    if (buildAnalysisPrompt(candidate).length > MAX_PROMPT_CHARS) {
+      if (current.length === 0) {
+        throw new Error(
+          "Une affiliation dépasse à elle seule la taille maximale autorisée du prompt. " +
+          "Vérifiez cette valeur dans le fichier source."
+        );
+      }
+      batches.push(current);
+      current = [affiliation];
+
+      if (buildAnalysisPrompt(current).length > MAX_PROMPT_CHARS) {
+        throw new Error(
+          "Une affiliation dépasse à elle seule la taille maximale autorisée du prompt. " +
+          "Vérifiez cette valeur dans le fichier source."
+        );
+      }
+    } else {
+      current = candidate;
+    }
+  }
+
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+
+async function analyzeBatch(batch, onUsage) {
   const result = await invokeLLM({
-    prompt: "Tu es un expert en analyse de donnees bibliometriques. Voici une liste d'affiliations extraites d'un fichier.\nAnalyse cette liste et identifie les groupes d'affiliations qui representent la MEME organisation mais ecrites differemment (variantes, abreviations, filiales, etc.).\n\nPour chaque groupe trouve :\n- Liste toutes les variantes (uniquement parmi les affiliations fournies)\n- Propose un nom fusionne (le plus standard/officiel possible)\n- Donne un score de confiance entre 0 et 1\n\nIMPORTANT :\n- Ne fusionne que si tu es CERTAIN que ce sont les memes organisations.\n- Ne regroupe PAS des organisations differentes qui collaborent souvent ensemble.\n- Ne cree pas de groupes avec une seule variante.\n- Sois conservateur : mieux vaut ne pas fusionner que mal fusionner.\n\nListe des affiliations :\n" + batch.join("\n"),
+    prompt: buildAnalysisPrompt(batch),
+    onUsage,
     response_json_schema: {
       type: "object",
-      properties: { fusion_groups: { type: "array", items: { type: "object", properties: { variants: { type: "array", items: { type: "string" } }, merged_name: { type: "string" }, confidence: { type: "number" } }, required: ["variants", "merged_name", "confidence"] } } },
-      required: ["fusion_groups"],
-    },
+      properties: {
+        fusion_groups: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              variants: { type: "array", items: { type: "string" } },
+              merged_name: { type: "string" },
+              confidence: { type: "number" }
+            },
+            required: ["variants", "merged_name", "confidence"]
+          }
+        }
+      },
+      required: ["fusion_groups"]
+    }
   });
-  return result.fusion_groups || [];
+
+  const allowed = new Set(batch.map((value) => value.trim().toLowerCase()));
+  const groups = result.fusion_groups || [];
+
+  for (const group of groups) {
+    if (!Array.isArray(group.variants)) {
+      throw new Error("Albert a renvoyé un groupe sans liste de variantes valide.");
+    }
+    group.variants = group.variants.filter(
+      (value) => typeof value === "string" &&
+        allowed.has(value.trim().toLowerCase())
+    );
+  }
+
+  return groups.filter((group) => group.variants.length > 1);
 }
 
 function mergeGroups(groups) {
   const result = [];
   for (const group of groups) {
     const variantSet = new Set(group.variants.map((v) => v.trim().toLowerCase()));
-    const existing = result.find((g) => g.variants.some((v) => variantSet.has(v.trim().toLowerCase())));
-    if (existing) { const combined = new Set([...existing.variants.map((v) => v.trim()), ...group.variants.map((v) => v.trim())]); existing.variants = [...combined]; if (group.confidence > existing.confidence) { existing.merged_name = group.merged_name; existing.confidence = group.confidence; } }
-    else { result.push({ ...group, variants: group.variants.map((v) => v.trim()) }); }
+    const existing = result.find((g) =>
+      g.variants.some((v) => variantSet.has(v.trim().toLowerCase()))
+    );
+    if (existing) {
+      const combined = new Set([
+        ...existing.variants.map((v) => v.trim()),
+        ...group.variants.map((v) => v.trim())
+      ]);
+      existing.variants = [...combined];
+      if (group.confidence > existing.confidence) {
+        existing.merged_name = group.merged_name;
+        existing.confidence = group.confidence;
+      }
+    } else {
+      result.push({ ...group, variants: group.variants.map((v) => v.trim()) });
+    }
   }
   return result;
 }
@@ -58,14 +134,53 @@ export default function AffiliationMerger() {
 
   const dictionary = useDictionary();
 
-  const runIAAnalysis = useCallback(async (uniqueAffiliations, options = {}) => {
-    const { useBatches = false } = options;
-    const BATCH_SIZE = useBatches ? 50 : 100000;
-    const batches = uniqueAffiliations.length > 0 ? chunkArray(uniqueAffiliations, BATCH_SIZE) : [];
+  const runIAAnalysis = useCallback(async (uniqueAffiliations) => {
+    const batches = buildBatchesByPromptSize(uniqueAffiliations);
     setProgress({ current: 0, total: batches.length });
     setStep(STEP_ANALYSIS);
+
     const iaGroups = [];
-    for (let i = 0; i < batches.length; i++) { const batchGroups = await analyzeBatch(batches[i]); iaGroups.push(...batchGroups); setProgress({ current: i + 1, total: batches.length }); }
+    const submitted = new Set();
+    let actualPromptTokens = 0;
+    let actualCompletionTokens = 0;
+
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+
+      for (const affiliation of batch) {
+        const key = affiliation.trim().toLowerCase();
+        if (submitted.has(key)) {
+          throw new Error("Contrôle de couverture : une affiliation a été envoyée deux fois.");
+        }
+        submitted.add(key);
+      }
+
+      const batchGroups = await analyzeBatch(batch, (usage) => {
+        if (Number.isFinite(usage?.prompt_tokens)) {
+          actualPromptTokens += usage.prompt_tokens;
+        }
+        if (Number.isFinite(usage?.completion_tokens)) {
+          actualCompletionTokens += usage.completion_tokens;
+        }
+      });
+
+      iaGroups.push(...batchGroups);
+      setProgress({ current: i + 1, total: batches.length });
+
+      console.info(
+        `Lot ${i + 1}/${batches.length} traité : ${batch.length} affiliations ; ` +
+        `tokens entrée cumulés : ${actualPromptTokens} ; ` +
+        `tokens sortie cumulés : ${actualCompletionTokens}`
+      );
+    }
+
+    if (submitted.size !== uniqueAffiliations.length) {
+      throw new Error(
+        `Contrôle de couverture échoué : ${submitted.size} affiliations envoyées sur ` +
+        `${uniqueAffiliations.length}. L'analyse ne sera pas validée.`
+      );
+    }
+
     return mergeGroups(iaGroups);
   }, []);
 

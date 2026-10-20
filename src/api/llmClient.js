@@ -13,7 +13,7 @@ function fatal(message) {
   return error;
 }
 
-export async function invokeLLM({ prompt, response_json_schema }) {
+export async function invokeLLM({ prompt, response_json_schema, onUsage }) {
   if (typeof prompt !== "string" || !prompt.trim()) {
     throw fatal("Le prompt envoyé à l'IA est vide.");
   }
@@ -69,6 +69,10 @@ export async function invokeLLM({ prompt, response_json_schema }) {
         }
 
         throw lastError;
+      }
+
+      if (typeof onUsage === "function") {
+        onUsage(data?.usage ?? null);
       }
 
       const text = data?.content || "";
